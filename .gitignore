@@ -1,0 +1,17 @@
+# Flutter
+build/
+.dart_tool/
+.flutter-plugins*
+.packages
+
+# Node (API)
+wallet-api/node_modules/
+wallet-api/uploads/
+wallet-api/npm-debug.log*
+wallet-api/.env
+
+# OS/editor
+.DS_Store
+Thumbs.db
+.idea/
+*.iml
