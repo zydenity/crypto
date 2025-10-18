@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import '../../../core/app_colors.dart';
 import '../services/auth_service.dart';
 import 'signup_screen.dart';
+import 'verify_email_notice_screen.dart'; // 👈 add this
+
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -12,36 +14,80 @@ class LoginScreen extends StatefulWidget {
 
 class _LoginScreenState extends State<LoginScreen> {
   final _form = GlobalKey<FormState>();
-  final _phoneCtrl = TextEditingController();      // or email
+  final _emailCtrl = TextEditingController();
   final _passCtrl  = TextEditingController();
   bool _obscure = true;
   bool _loading = false;
 
   @override
-  void dispose() { _phoneCtrl.dispose(); _passCtrl.dispose(); super.dispose(); }
+  void dispose() {
+    _emailCtrl.dispose();
+    _passCtrl.dispose();
+    super.dispose();
+  }
+
+  String? _validateEmail(String? v) {
+    final value = v?.trim() ?? '';
+    if (value.isEmpty) return 'Email is required';
+    // Simple, safe email check (no extra deps)
+    final emailRe = RegExp(r'^[^\s@]+@[^\s@]+\.[^\s@]+$');
+    if (!emailRe.hasMatch(value)) return 'Enter a valid email';
+    return null;
+  }
 
   Future<void> _login() async {
     if (!_form.currentState!.validate()) return;
     setState(() => _loading = true);
+
+    final email = _emailCtrl.text.trim();
+    final pass  = _passCtrl.text;
+
     try {
       final ok = await AuthService.instance.login(
-        identifier: _phoneCtrl.text.trim(),
-        password: _passCtrl.text,
+        identifier: email,
+        password: pass,
       );
+
       if (!mounted) return;
       if (ok) {
-        // TODO: go to your main app/home
         Navigator.of(context).pushReplacementNamed('/home');
-      } else {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Invalid credentials')),
-        );
+        return;
       }
+
+      // Normally won’t reach here, but keep a fallback:
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Invalid credentials')),
+      );
+
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Login failed: $e')));
-    } finally { if (mounted) setState(() => _loading = false); }
+      final msg = e.toString();
+
+      if (msg.contains('Email not verified') || msg.contains('EMAIL_NOT_VERIFIED')) {
+        // 👉 proactively (re)send the verification email
+        try {
+          await AuthService.instance.resendVerification(email: email);
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Verification link sent. Please check your email.')),
+          );
+        } catch (_) {}
+
+        Navigator.of(context).pushReplacement(
+          MaterialPageRoute(
+            builder: (_) => VerifyEmailNoticeScreen(email: email, password: pass),
+          ),
+        );
+        return;
+      }
+
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text('Login failed: $e')));
+    }
+
   }
+
+
+
 
   @override
   Widget build(BuildContext context) {
@@ -53,18 +99,19 @@ class _LoginScreenState extends State<LoginScreen> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              // Brand
               const SizedBox(height: 24),
               Center(
                 child: Column(
                   children: [
-                    Text('CryptoAI',
-                        style: TextStyle(
-                          color: AppColors.accent,
-                          fontSize: 36,
-                          fontWeight: FontWeight.w900,
-                          letterSpacing: .5,
-                        )),
+                    Text(
+                      'CryptoAI',
+                      style: TextStyle(
+                        color: AppColors.accent,
+                        fontSize: 36,
+                        fontWeight: FontWeight.w900,
+                        letterSpacing: .5,
+                      ),
+                    ),
                     const SizedBox(height: 4),
                     Text('Sign in to continue', style: TextStyle(color: AppColors.subtle)),
                   ],
@@ -72,22 +119,22 @@ class _LoginScreenState extends State<LoginScreen> {
               ),
               const SizedBox(height: 36),
 
-              // Form
               Form(
                 key: _form,
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    Text('Phone or Email', style: TextStyle(color: AppColors.subtle, fontSize: 13)),
+                    Text('Email', style: TextStyle(color: AppColors.subtle, fontSize: 13)),
                     const SizedBox(height: 8),
                     TextFormField(
-                      controller: _phoneCtrl,
+                      controller: _emailCtrl,
                       keyboardType: TextInputType.emailAddress,
+                      autofillHints: const [AutofillHints.username, AutofillHints.email],
                       decoration: const InputDecoration(
-                        hintText: 'e.g. +63 9xx xxx xxxx / you@domain.com',
-                        prefixIcon: Icon(Icons.person_outline),
+                        hintText: 'Email',
+                        prefixIcon: Icon(Icons.email_outlined),
                       ),
-                      validator: (v) => (v == null || v.trim().isEmpty) ? 'Required' : null,
+                      validator: _validateEmail,
                     ),
                     const SizedBox(height: 16),
                     Text('Password', style: TextStyle(color: AppColors.subtle, fontSize: 13)),
@@ -95,6 +142,7 @@ class _LoginScreenState extends State<LoginScreen> {
                     TextFormField(
                       controller: _passCtrl,
                       obscureText: _obscure,
+                      autofillHints: const [AutofillHints.password],
                       decoration: InputDecoration(
                         hintText: 'Enter password',
                         prefixIcon: const Icon(Icons.lock_outline),
@@ -103,7 +151,7 @@ class _LoginScreenState extends State<LoginScreen> {
                           icon: Icon(_obscure ? Icons.visibility_off_outlined : Icons.visibility_outlined),
                         ),
                       ),
-                      validator: (v) => (v == null || v.isEmpty) ? 'Required' : null,
+                      validator: (v) => (v == null || v.isEmpty) ? 'Password is required' : null,
                     ),
                     const SizedBox(height: 10),
                     Align(

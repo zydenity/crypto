@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../../../core/app_colors.dart';
+import '../../auth/services/auth_service.dart';
 
 class ProfileScreen extends StatefulWidget {
   const ProfileScreen({super.key});
@@ -19,10 +20,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
         content: const Text('You’ll need to log in again to access your wallet.'),
         actions: [
           TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
-          ElevatedButton(
-            onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('Log out'),
-          ),
+          ElevatedButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Log out')),
         ],
       ),
     );
@@ -31,19 +29,14 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
     setState(() => _busy = true);
     try {
-      // Firebase sign-out (safe to call even if no user is signed in)
-
-
-      // TODO: If you store API/JWT tokens locally, clear them here
-      // e.g. await SecureStorage().delete(key: 'auth_token');
-
+      await AuthService.instance.logout(); // <-- clear JWT + user from storage
       if (!mounted) return;
-      // Navigate to your login screen; change route name as needed
-      Navigator.of(context).pushNamedAndRemoveUntil('/login', (route) => false);
+      Navigator.of(context).pushNamedAndRemoveUntil('/login', (_) => false);
     } finally {
       if (mounted) setState(() => _busy = false);
     }
   }
+
 
   @override
   Widget build(BuildContext context) {

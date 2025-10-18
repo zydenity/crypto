@@ -8,7 +8,7 @@ import '../features/qr/presentation/qr_screen.dart' as qr;
 import '../features/transactions/presentation/transactions_screen.dart' as tx;
 import '../features/profile/presentation/profile_screen.dart' as profile;
 import '../features/wallet/presentation/wallet_screen.dart' as wallet;
-
+import '../features/auth/presentation/verify_email_notice_screen.dart';
 // auth service with its own prefix
 import '../features/auth/services/auth_service.dart' as auth;
 
@@ -25,6 +25,10 @@ class CryptoWalletApp extends StatelessWidget {
       routes: {
         '/login': (_) => const authui.LoginScreen(),
         '/home' : (_) => const _HomeShell(),
+        '/verify': (ctx) {
+          final email = ModalRoute.of(ctx)!.settings.arguments as String;
+          return VerifyEmailNoticeScreen(email: email);
+        },
       },
     );
   }

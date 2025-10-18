@@ -214,67 +214,25 @@ class WalletApi {
   }
 
   Future<Map<String, dynamic>> getBalance({
-    required String address,
+    String? address,
     String tokenSymbol = 'USDT',
-    String network = 'ethereum', // or 'tron' / 'bsc' if that’s your default
     bool debug = false,
   }) async {
-    final addr = address.toLowerCase().trim();
-    final token = tokenSymbol.toUpperCase();
-    final net = network.toLowerCase();
-
-    // Try modern then legacy paths
-    final paths = <String>[
-      '/wallet/balance?address=$addr&token=$token&network=$net${debug ? '&debug=1' : ''}',
-      '/balance?address=$addr&token=$token&network=$net${debug ? '&debug=1' : ''}',
-      '/balance?address=$addr&tokenSymbol=$token${debug ? '&debug=1' : ''}', // last-resort legacy
-    ];
-
-    http.Response? last;
-    for (final p in paths) {
-      final r = await _authedGetResp(p);
-      if (r.statusCode == 200) {
-        final raw = jsonDecode(r.body) as Map<String, dynamic>;
-
-        double asD(dynamic v) =>
-            v is num ? v.toDouble() : double.tryParse('$v') ?? 0.0;
-
-        // Normalize variants coming from different server versions
-        final available = asD(raw['available'] ?? raw['spendable'] ?? raw['verified'] ?? 0);
-        final verified  = asD(raw['verified']  ?? raw['confirmed']  ?? available);
-        final pending   = asD(raw['pending']   ?? raw['unconfirmed'] ?? 0);
-
-        return {
-          'available': available,
-          'verified': verified,
-          'pending': pending,
-        };
-      }
-      last = r;
-      if (r.statusCode == 404) continue;
-      throw Exception('GET $p failed: ${r.statusCode} ${r.body}');
-    }
-
-    throw Exception('Balance endpoint not found: tried ${paths.join(", ")}'
-        '${last != null ? ' (last=${last.statusCode})' : ''}');
+    final q = [
+      if (address != null) 'address=$address',
+      'tokenSymbol=$tokenSymbol',
+      if (debug) 'debug=1',
+    ].join('&');
+    final r = await _authedGet('/balance?$q');
+    return r as Map<String, dynamic>;
   }
-
 
   Future<double> getSpendableUsdt({bool debug = false}) async {
     final addr = await getDefaultAddress();
     if (addr == null) throw Exception('NO_DEFAULT_WALLET');
     final bal = await getBalance(address: addr, tokenSymbol: 'USDT', debug: debug);
-    return (bal['available'] as num).toDouble(); // <— use available
+    return (bal['verified'] as num).toDouble();
   }
-
-  Future<Map<String, dynamic>> getDefaultSpendable() async {
-    final addr = await getDefaultAddress();
-    if (addr == null) throw Exception('NO_DEFAULT_WALLET');
-    final bal = await getBalance(address: addr, tokenSymbol: 'USDT');
-    return {'address': addr, 'available': (bal['available'] as num).toDouble()};
-  }
-
-
 
   // ------------------------------ deposits -----------------------------------
   Future<Map<String, dynamic>> uploadDepositProof({
@@ -458,7 +416,12 @@ class WalletApi {
     });
   }
 
-
+  Future<Map<String, dynamic>> getDefaultSpendable() async {
+    final addr = await getDefaultAddress();
+    if (addr == null) throw Exception('NO_DEFAULT_WALLET');
+    final bal = await getBalance(address: addr, tokenSymbol: 'USDT');
+    return {'address': addr, 'available': (bal['verified'] as num).toDouble()};
+  }
 
   // -------------------------------- Referrals ---------------------------------
   Future<Map<String, dynamic>> getReferralSummary() async {

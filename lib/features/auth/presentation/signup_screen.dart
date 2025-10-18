@@ -3,7 +3,6 @@ import '../../../core/app_colors.dart';
 import '../services/auth_service.dart';
 import '../../referrals/services/referral_service.dart';
 
-
 class SignUpScreen extends StatefulWidget {
   const SignUpScreen({super.key});
 
@@ -13,40 +12,51 @@ class SignUpScreen extends StatefulWidget {
 
 class _SignUpScreenState extends State<SignUpScreen> {
   final _form = GlobalKey<FormState>();
-  final _nameCtrl = TextEditingController();
-  final _phoneCtrl = TextEditingController();  // or email
+  final _nameCtrl  = TextEditingController();
+  final _emailCtrl = TextEditingController();
   final _passCtrl  = TextEditingController();
   bool _obscure = true;
   bool _loading = false;
 
   @override
-  void dispose() { _nameCtrl.dispose(); _phoneCtrl.dispose(); _passCtrl.dispose(); super.dispose(); }
+  void dispose() {
+    _nameCtrl.dispose();
+    _emailCtrl.dispose();
+    _passCtrl.dispose();
+    super.dispose();
+  }
+
+  String? _validateEmail(String? v) {
+    final value = v?.trim() ?? '';
+    if (value.isEmpty) return 'Email is required';
+    final emailRe = RegExp(r'^[^\s@]+@[^\s@]+\.[^\s@]+$');
+    if (!emailRe.hasMatch(value)) return 'Enter a valid email';
+    return null;
+  }
 
   Future<void> _signup() async {
     if (!_form.currentState!.validate()) return;
+    FocusScope.of(context).unfocus();
     setState(() => _loading = true);
+
+    final email = _emailCtrl.text.trim();
+
     try {
-      // 👇 read pending "ref" captured earlier (from a link/deeplink)
-// in SignUpScreen._signup()
       final pendingRef = await ReferralService.instance.getPendingRefCode();
+
       final assigned = await AuthService.instance.register(
         name: _nameCtrl.text.trim(),
-        identifier: _phoneCtrl.text.trim(),
+        identifier: email,
         password: _passCtrl.text,
         referralCode: pendingRef,
       );
-      await ReferralService.instance.clearPendingRefCode();
 
+      await ReferralService.instance.clearPendingRefCode();
       final refCode = await ReferralService.instance.ensureCreatedAfterSignup();
 
-
-
-      // Create/fetch *your* own code after signup
-
-
       if (!mounted) return;
-      Navigator.of(context).pushReplacementNamed('/home');
 
+      // Optional toasts (they may not show if you immediately navigate)
       if (assigned != null && assigned.isNotEmpty) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Wallet assigned: ${assigned.substring(0,6)}…${assigned.substring(assigned.length-4)}')),
@@ -57,9 +67,22 @@ class _SignUpScreenState extends State<SignUpScreen> {
           SnackBar(content: Text('Referral code created: $refCode')),
         );
       }
+
+      // Decide where to go based on whether we already have a session
+      if (AuthService.instance.isLoggedIn) {
+        // Old flow: server returned token -> go home
+        Navigator.of(context).pushNamedAndRemoveUntil('/home', (_) => false);
+      } else {
+        // New flow: email verification required -> go to verify notice
+        Navigator.of(context).pushReplacementNamed('/verify', arguments: email);
+      }
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Sign up failed: $e')));
+      final msg = e.toString();
+      final friendly = (msg.contains('IDENTIFIER_TAKEN') || msg.contains('409'))
+          ? 'Email already in use'
+          : 'Sign up failed: $e';
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(friendly)));
     } finally {
       if (mounted) setState(() => _loading = false);
     }
@@ -80,9 +103,10 @@ class _SignUpScreenState extends State<SignUpScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                Text('Let’s get you started',
-                    style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w700)),
+                const Text('Let’s get you started',
+                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700)),
                 const SizedBox(height: 20),
+
                 TextFormField(
                   controller: _nameCtrl,
                   decoration: const InputDecoration(
@@ -92,19 +116,24 @@ class _SignUpScreenState extends State<SignUpScreen> {
                   validator: (v) => (v == null || v.trim().isEmpty) ? 'Required' : null,
                 ),
                 const SizedBox(height: 12),
+
                 TextFormField(
-                  controller: _phoneCtrl,
+                  controller: _emailCtrl,
                   keyboardType: TextInputType.emailAddress,
+                  autofillHints: const [AutofillHints.username, AutofillHints.email],
                   decoration: const InputDecoration(
-                    labelText: 'Phone or Email',
-                    prefixIcon: Icon(Icons.person_outline),
+                    labelText: 'Email',
+                    hintText: 'you@domain.com',
+                    prefixIcon: Icon(Icons.email_outlined),
                   ),
-                  validator: (v) => (v == null || v.trim().isEmpty) ? 'Required' : null,
+                  validator: _validateEmail,
                 ),
                 const SizedBox(height: 12),
+
                 TextFormField(
                   controller: _passCtrl,
                   obscureText: _obscure,
+                  autofillHints: const [AutofillHints.newPassword],
                   decoration: InputDecoration(
                     labelText: 'Password',
                     prefixIcon: const Icon(Icons.lock_outline),
@@ -116,6 +145,7 @@ class _SignUpScreenState extends State<SignUpScreen> {
                   validator: (v) => (v == null || v.length < 6) ? 'Min 6 characters' : null,
                 ),
                 const SizedBox(height: 20),
+
                 FilledButton(
                   onPressed: _loading ? null : _signup,
                   style: FilledButton.styleFrom(

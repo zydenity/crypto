@@ -17,13 +17,12 @@ class AuthService {
   // ---------------------------------------------------------------------------
   // Config / getters
   // ---------------------------------------------------------------------------
-  final _apiBaseFromEnv = String.fromEnvironment('API_BASE', defaultValue: '');
+  // must be const on web
+  static const String _apiBaseFromEnv =
+  String.fromEnvironment('API_BASE', defaultValue: '');
 
   String get baseUrl {
-    // If provided at build time, always use it (prod/staging/web/mobile)
     if (_apiBaseFromEnv.isNotEmpty) return _apiBaseFromEnv;
-
-    // Dev fallbacks:
     final isAndroidEmu = !kIsWeb && defaultTargetPlatform == TargetPlatform.android;
     return isAndroidEmu ? 'http://10.0.2.2:3000' : 'http://localhost:3000';
   }
@@ -53,16 +52,16 @@ class AuthService {
   /// Registers a new user.
   /// Returns the assigned wallet address if the backend includes it; otherwise null.
   ///
-  /// If the backend returns { token, user }, we save the session immediately.
-  /// If it only returns { ok, userId }, we automatically call [login] so the
-  /// app lands authenticated after sign-up.
+  /// NOTE: For email verification flow, backend returns { ok, verifyEmailSent, user, wallet }
+  /// and DOES NOT return a token until the email is verified. We **do not** auto-login here.
   Future<String?> register({
     required String name,
-    required String identifier,
+    required String identifier, // email
     required String password,
-    String? referralCode, // optional
+    String? referralCode,
   }) async {
-    final resp = await http.post(
+    final resp = await http
+        .post(
       Uri.parse('$baseUrl/auth/register'),
       headers: const {
         'Content-Type': 'application/json',
@@ -74,37 +73,37 @@ class AuthService {
         'password': password,
         if (referralCode != null && referralCode.isNotEmpty) 'referralCode': referralCode,
       }),
-    );
+    )
+        .timeout(const Duration(seconds: 15)); // see #2
 
+    if (resp.statusCode == 409) {
+      throw Exception('Email already in use');
+    }
     if (resp.statusCode != 201 && resp.statusCode != 200) {
       throw Exception('Register failed: ${resp.statusCode} ${resp.body}');
     }
 
     final body = jsonDecode(resp.body) as Map<String, dynamic>;
-
     final token = body['token'] as String?;
     final user  = body['user']  as Map<String, dynamic>?;
 
     if (token != null && user != null) {
-      await _saveSession(token, user);
-    } else {
-      // Older shape: only { ok, userId } -> auto-login with same credentials.
-      await login(identifier: identifier, password: password);
+      await _saveSession(token, user); // older flow support
     }
 
-    // Accept both shapes for the assigned address:
-    // - { assignedAddress: "0x..." } (older)
-    // - { wallet: { address: "0x..." } } (current)
     final assignedFromField  = body['assignedAddress'] as String?;
     final assignedFromWallet =
     (body['wallet'] is Map<String, dynamic>) ? (body['wallet']['address'] as String?) : null;
 
+    final verifySent = (body['verifyEmailSent'] == true);
     return assignedFromField ?? assignedFromWallet;
   }
 
+
   /// Logs the user in and persists token + user.
+  /// Throws an Exception('Email not verified') if the server blocks unverified users.
   Future<bool> login({
-    required String identifier,
+    required String identifier, // email
     required String password,
   }) async {
     final resp = await http.post(
@@ -115,6 +114,18 @@ class AuthService {
       },
       body: jsonEncode({'identifier': identifier, 'password': password}),
     );
+
+    if (resp.statusCode == 403) {
+      // Expected shape: { ok:false, error: 'EMAIL_NOT_VERIFIED' }
+      try {
+        final m = jsonDecode(resp.body);
+        if (m is Map && m['error'] == 'EMAIL_NOT_VERIFIED') {
+          throw Exception('Email not verified');
+        }
+      } catch (_) {
+        // fall through to generic error
+      }
+    }
 
     if (resp.statusCode != 200) {
       throw Exception('Login failed: ${resp.statusCode} ${resp.body}');
@@ -130,6 +141,30 @@ class AuthService {
 
     await _saveSession(token, user);
     return true;
+  }
+// lib/features/auth/services/auth_service.dart
+  Future<bool> checkVerified(String email) async {
+    final uri = Uri.parse('$baseUrl/auth/verify/check')
+        .replace(queryParameters: {'email': email});
+    final resp = await http.get(uri, headers: const {'Accept': 'application/json'});
+    if (resp.statusCode != 200) return false;
+    final m = jsonDecode(resp.body) as Map<String, dynamic>;
+    return (m['verified'] == true);
+  }
+
+  /// Resend verification email for the given address.
+  Future<void> resendVerification({required String email}) async {
+    final resp = await http.post(
+      Uri.parse('$baseUrl/auth/resend-verification'),
+      headers: const {
+        'Content-Type': 'application/json',
+        'Accept': 'application/json',
+      },
+      body: jsonEncode({'email': email}),
+    );
+    if (resp.statusCode != 200) {
+      throw Exception('Resend failed: ${resp.statusCode} ${resp.body}');
+    }
   }
 
   Future<void> logout() async {
